@@ -1,4 +1,4 @@
-# NCAAWB
+# NCAA Women's Basketball Analytics
 
 This repository includes code from a personal project that I started purely to help develop my R skills.
 
