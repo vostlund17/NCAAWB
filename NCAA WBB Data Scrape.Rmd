@@ -1,0 +1,775 @@
+---
+title: "NCAA WBB Web Scrape"
+author: "Viktor Ostlund"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Issues / To Dos
+
+- Oregon: All the games show up as neutral because they don't have a home/away node in the HTML I believe?
+- Make a csv with all the teams and all of their websites so that you can run a for loop through them to see if the code works for everything
+- Mark which games are conference games and which ones are not
+- See if there's a way to access stats from the games easily
+- Get lots of different metrics for performance and then see how well they do explaining outcomes in a logistic regression
+- use 2018-2019 and 2019-2020 as training sets and 2022 as the test set (first ten games of conference data )
+- see if I can code in the year I want into drawing data
+- maybe try run stuff on the big ten only at first (everyone plays everyone)
+
+External Table
+- Name of School
+- Overall athletics link
+- Womens basketball schedule page link
+- Location of Home Court
+
+
+Different metrics to use to analyze how good a team is at offense and defence
+- Points per game (for and against) - Probably the weakest
+- On average, how many more points you scored than the other team's average points against (metric for how much better you are than that team's opponents that year) --> this goes both way
+   - For each game, get the opponent's average points against and subtract that from the number of points the team scored that       - game --> then take an average across the season
+   
+   
+Three teams
+- A 80 - 60 B
+- B 65 - 60 C
+- C 90 - 70 A
+
+Average Points per Game
+- Team A: 75
+- Team B: 62.5
+- Team C: 75
+
+Average Points against per Game
+- Team A: 75
+- Team B: 70
+- Team C: 67.5
+
+Average Point Difference
+- Team A: 0
+- Team B: -7.5
+- Team C: +7.5
+
+Average Points for vs Opponents Points Against Average Difference
+- Team A: + 6.25 (+10, +2.5)
+- Team B: - 8.75 (-15, -2.5)
+- Team C: + 2.5 (-10, + 15)
+
+Average Points against vs Opponents Points 
+
+Load the Packages
+```{r}
+library(xml2)
+library(rvest)
+library(dplyr)
+library(tidytext)
+library(tm)
+library(ggplot2)
+library(forcats)
+library(stringr)
+library(sqldf)
+library(readxl)
+```
+
+Test Work
+```{r}
+test_site <- "https://gophersports.com/sports/womens-basketball/schedule/2021-22"
+test_html <- read_html(test_site)
+test_nodes <- test_html %>% html_nodes(".sidearm-schedule-home-game.W:nth-child(1) .row")
+test_text_column <- test_nodes %>% html_text()
+test_text_df <- data.frame(test_text_col = test_text_column)
+test_text_df$test_text_col <- gsub("  ", "", test_text_df$test_text_col)
+test_text_df$test_text_col <- gsub("\n", "", test_text_df$test_text_col)
+test_text_df$test_text_col <- gsub("\r", "", test_text_df$test_text_col)
+view(test_text_df)
+```
+
+BIG TEN SCHEDULE HTMLS
+```{r}
+
+```
+
+Test table:
+```{r}
+# gopher_boxscore <- "https://gophersports.com/sports/womens-basketball/stats/2021-22/northwestern/boxscore/19455"
+# gopher_html <- read_html(gopher_boxscore)
+gopher_tables <- html_table(gopher_html)
+gopher_Table <- gopher_tables[[5]]
+gopher_Table <- gopher_Table %>% filter(gopher_Table$'##' != "TM"
+                                        & gopher_Table$Player != "Totals"
+                                        & grepl("Mershon", gopher_Table$Player)) %>% 
+  mutate(Opponent = "Northwestern")
+view(gopher_Table)
+```
+
+Northwestern test table
+```{r}
+# wildcat_boxscore <- "https://fightingillini.com/sports/womens-basketball/stats/2021-22/rutgers/boxscore/23438"
+# wildcat_html <- read_html(wildcat_boxscore)
+wildcat_tables <- html_table(wildcat_html)
+wildcat_table <- wildcat_tables[[5]]
+view(wildcat_table)
+```
+
+```{r}
+wolverine_boxscore <- "https://mgoblue.com/sports/womens-basketball/stats/2021-22/wisconsin/boxscore/20984"
+wolverine_html <- read_html(wolverine_boxscore)
+wolverine_tables <- html_table(wolverine_html)
+wolverine_table <- wolverine_tables[[5]]
+view(wolverine_table)
+```
+
+THE FULL TABLE
+```{r}
+the_full_table <- full_join(gopher_Table, wildcat_table)
+view(the_full_table)
+```
+
+```{r}
+Big_Ten_WBB_Info <- read.csv("Desktop/Big Ten WBB Info.csv")
+
+for (i in 1:nrow(Big_Ten_WBB_Info)) {
+  assign(paste(Big_Ten_WBB_Info$School.Name[i], "_HTML_code", sep = ""), read_html(Big_Ten_WBB_Info$Womens.Basketball.Schedule.Link[i]))
+}
+```
+
+Different schedule links
+```{r}
+michigan_url <- "https://mgoblue.com/sports/womens-basketball/schedule/2021-22" # WORKS
+northwestern_url <- "https://nusports.com/sports/womens-basketball/schedule/2021-22" # WORKS
+indiana_url <- "https://iuhoosiers.com/sports/womens-basketball/schedule/2021-22" # WORKS
+uindy_url  <- "https://athletics.uindy.edu/sports/womens-basketball/schedule" # Don't have the same nodes for home/away
+idaho_state_url <- "https://isubengals.com/sports/womens-basketball/schedule"
+oregon_url <- "https://goducks.com/sports/womens-basketball/schedule/2021-22" # All NEUTRAL ISSUE
+```
+
+FULL LOOP TO SCHEDULE
+```{r}
+for (i in c(1,2,4,5,6,7,8,9,11,12)) {
+wbb_html <- read_html(Big_Ten_WBB_Info$Womens.Basketball.Schedule.Link[i])
+
+wbb_html_nodes_opponents <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-name a")
+wbb_html_nodes_results <- wbb_html %>% html_nodes(".text-italic span")
+wbb_html_nodes_dates <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date")
+wbb_html_nodes_dates2 <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date span:nth-child(1)")
+wbb_html_nodes_times <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date span:nth-child(2)")
+wbb_html_nodes_coverage <- wbb_html %>% html_nodes(".sidearm-schedule-game-coverage ")
+wbb_html_nodes_home_away <- wbb_html %>% html_nodes(".sidearm-schedule-game-conference-vs")
+wbb_html_nodes_location <- wbb_html %>% html_nodes(".sidearm-schedule-game-location")
+
+opponents_column <- wbb_html_nodes_opponents %>% html_text()
+results_column <- wbb_html_nodes_results %>% html_text()
+dates_column <- wbb_html_nodes_dates %>% html_text()
+dates_column2 <- wbb_html_nodes_dates2 %>% html_text()
+times_column <- wbb_html_nodes_times %>% html_text()
+coverage_column <- wbb_html_nodes_coverage %>% html_text()
+home_away_column <- wbb_html_nodes_home_away %>% html_text()
+location_column <- wbb_html_nodes_location %>% html_text()
+
+location_df <- data.frame(location = location_column)
+location_df$location <- gsub("  ", "", location_df$location)
+location_df$location <- gsub("\n", "", location_df$location)
+location_df$location <- gsub("\r", "", location_df$location)
+
+home_away_df <- data.frame(home_away = home_away_column)
+home_away_df$home_away <- gsub(" ", "", home_away_df$home_away)
+home_away_df$home_away <- gsub("\n", "", home_away_df$home_away)
+home_away_df$home_away <- gsub("\r", "", home_away_df$home_away)
+
+home_away_df$Home_Away <- NA
+for (i in 1:nrow(home_away_df)) {
+  if (home_away_df$home_away[i] == "vs") {
+    home_away_df$Home_Away[i] <- "Home"
+  }
+  else if (home_away_df$home_away[i] == "at") {
+    home_away_df$Home_Away[i] <- "Away"
+  }
+  else {
+    home_away_df$Home_Away[i] <- "Neutral"
+  }
+}
+
+coverage_data_frame <- data.frame(coverage = coverage_column)
+coverage_data_frame$coverage <- gsub(" ", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- gsub("\r", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- gsub("\n", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- str_replace(coverage_data_frame$coverage,"Radio:", "SPLITRadio:")
+coverage_data_frame$coverage <- strsplit(coverage_data_frame$coverage, "SPLIT")
+coverage_data_frame$TV <- NA
+coverage_data_frame$Radio <- NA
+for (i in 1:nrow(coverage_data_frame)) {
+  coverage_data_frame$TV[i] <- coverage_data_frame$coverage[[i]][1]
+  coverage_data_frame$Radio[i] <- coverage_data_frame$coverage[[i]][2]
+}
+coverage_data_frame$TV <- gsub("TV:", "", coverage_data_frame$TV)
+coverage_data_frame$Radio <- gsub("Radio:", "", coverage_data_frame$Radio)
+
+dates_data_frame2 <- data.frame(the_date = dates_column2)
+dates_data_frame2$the_date <- gsub("[()]","", dates_data_frame2$the_date)
+for (day in c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")){
+  dates_data_frame2$the_date <- gsub(day, paste("SPLIT", day), dates_data_frame2$the_date)
+}
+dates_data_frame2$the_date <- strsplit(dates_data_frame2$the_date, "SPLIT")
+
+dates_data_frame2$Date <- NA
+dates_data_frame2$Day <- NA
+for (i in 1:nrow(dates_data_frame2)) {
+  dates_data_frame2$Date[i] <- dates_data_frame2$the_date[[i]][1]
+  dates_data_frame2$Day[i] <- dates_data_frame2$the_date[[i]][2]
+}
+
+times_data_frame <- data.frame(the_time = times_column)
+
+times_data_frame$the_time <- gsub("CT", "SPLITCT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("ET", "SPLITET", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("PT", "SPLITPT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("MT", "SPLITMT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("MST", "SPLITMST", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("[()]", "", times_data_frame$the_time)
+
+
+times_data_frame$the_time <- strsplit(times_data_frame$the_time, "SPLIT")
+
+times_data_frame$Time <- NA
+times_data_frame$Timezone <- NA
+for (i in 1:nrow(times_data_frame)) {
+  times_data_frame$Time[i] <- times_data_frame$the_time[[i]][1]
+  times_data_frame$Timezone[i] <- times_data_frame$the_time[[i]][2]
+}
+
+results_data_frame <- data.frame(Result = results_column) %>% filter(Result != "")
+results_data_frame$Result <- gsub(",", "", results_data_frame$Result)
+results_data_frame$Win_Loss <- NA
+results_data_frame$Score <- NA
+results_data_frame$Team_Score <- NA
+results_data_frame$Opponent_Score <- NA
+results_data_frame$Overtime <- NA
+for (i in 1:nrow(results_data_frame)) {
+  if (results_data_frame$Result[i] == "W") {
+    results_data_frame$Win_Loss[i] <- "W"
+  }
+  else if (results_data_frame$Result[i] == "L") {
+    results_data_frame$Win_Loss[i] <- "L"
+  }
+  else if (results_data_frame$Result[i] == "Canceled"
+           | results_data_frame$Result[i] == "Postponed"
+           | results_data_frame$Result[i] == "Forfeit") {
+    results_data_frame$Win_Loss[i] <- results_data_frame$Result[i]
+  }
+  else if (grepl("OT", results_data_frame$Result[i], fixed = TRUE)) {
+    results_data_frame$Overtime[i-2] <- results_data_frame$Result[i]
+  }
+  else {
+    #results_data_frame$Score[i-1] <- results_data_frame$Result[i]
+    results_data_frame$Team_Score[i-1] <- str_split(results_data_frame$Result[i], "-")[[1]][1]
+    results_data_frame$Opponent_Score[i-1] <- str_split(results_data_frame$Result[i], "-")[[1]][2]
+  }
+}
+
+results_data_frame <- results_data_frame %>%
+  filter(!is.na(Team_Score)
+         | Win_Loss == "Postponed"
+         | Win_Loss == "Canceled") %>%
+  select(Win_Loss, Team_Score, Opponent_Score, Overtime)
+
+WBB_Dataframe <- data.frame(Day = dates_data_frame2$Day,
+                            Date = dates_data_frame2$Date,
+                            Time = times_data_frame$Time,
+                            Timezone = times_data_frame$Timezone,
+                            Home_Away = home_away_df$Home_Away,
+                            Opponent = opponents_column,
+                            Win_Loss = results_data_frame$Win_Loss,
+                            Team_Score = as.numeric(results_data_frame$Team_Score),
+                            Opponent_Score = as.numeric(results_data_frame$Opponent_Score),
+                            OT = results_data_frame$Overtime,
+                            TV = coverage_data_frame$TV,
+                            Radio = coverage_data_frame$Radio,
+                            Location = location_df$location)
+
+write.csv(WBB_Dataframe, paste("Desktop/", Big_Ten_WBB_Info$School.Name[i], ".csv", sep = ""))
+
+}
+```
+
+HTML Nodes & HTML Text
+```{r}
+#wbb_html <- read_html("https://fightingillini.com/sports/womens-basketball/schedule/2021-22")
+wbb_html <- Nebraska_HTML_code
+
+wbb_html_nodes_opponents <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-name a")
+wbb_html_nodes_results <- wbb_html %>% html_nodes(".text-italic span")
+wbb_html_nodes_dates <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date")
+wbb_html_nodes_dates2 <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date span:nth-child(1)")
+wbb_html_nodes_times <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date span:nth-child(2)")
+wbb_html_nodes_coverage <- wbb_html %>% html_nodes(".sidearm-schedule-game-coverage ")
+wbb_html_nodes_home_away <- wbb_html %>% html_nodes(".sidearm-schedule-game-conference-vs")
+wbb_html_nodes_location <- wbb_html %>% html_nodes(".sidearm-schedule-game-location")
+
+opponents_column <- wbb_html_nodes_opponents %>% html_text()
+results_column <- wbb_html_nodes_results %>% html_text()
+dates_column <- wbb_html_nodes_dates %>% html_text()
+dates_column2 <- wbb_html_nodes_dates2 %>% html_text()
+times_column <- wbb_html_nodes_times %>% html_text()
+coverage_column <- wbb_html_nodes_coverage %>% html_text()
+home_away_column <- wbb_html_nodes_home_away %>% html_text()
+location_column <- wbb_html_nodes_location %>% html_text()
+
+```
+
+Location Manipulations
+```{r}
+location_df <- data.frame(location = location_column)
+location_df$location <- gsub("  ", "", location_df$location)
+location_df$location <- gsub("\n", "", location_df$location)
+location_df$location <- gsub("\r", "", location_df$location)
+```
+
+Home_Away Manipulations
+```{r}
+home_away_df <- data.frame(home_away = home_away_column)
+home_away_df$home_away <- gsub(" ", "", home_away_df$home_away)
+home_away_df$home_away <- gsub("\n", "", home_away_df$home_away)
+home_away_df$home_away <- gsub("\r", "", home_away_df$home_away)
+
+home_away_df$Home_Away <- NA
+for (i in 1:nrow(home_away_df)) {
+  if (home_away_df$home_away[i] == "vs") {
+    home_away_df$Home_Away[i] <- "Home"
+  }
+  else if (home_away_df$home_away[i] == "at") {
+    home_away_df$Home_Away[i] <- "Away"
+  }
+  else {
+    home_away_df$Home_Away[i] <- "Neutral"
+  }
+}
+```
+
+Coverage Manipulations
+```{r}
+coverage_data_frame <- data.frame(coverage = coverage_column)
+coverage_data_frame$coverage <- gsub(" ", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- gsub("\r", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- gsub("\n", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- str_replace(coverage_data_frame$coverage,"Radio:", "SPLITRadio:")
+coverage_data_frame$coverage <- strsplit(coverage_data_frame$coverage, "SPLIT")
+coverage_data_frame$TV <- NA
+coverage_data_frame$Radio <- NA
+for (i in 1:nrow(coverage_data_frame)) {
+  coverage_data_frame$TV[i] <- coverage_data_frame$coverage[[i]][1]
+  coverage_data_frame$Radio[i] <- coverage_data_frame$coverage[[i]][2]
+}
+coverage_data_frame$TV <- gsub("TV:", "", coverage_data_frame$TV)
+coverage_data_frame$Radio <- gsub("Radio:", "", coverage_data_frame$Radio)
+```
+
+Dates Manipulations (see take 2 for better and more efficient)
+```{r}
+# dates_data_frame <- data.frame(dtn = dates_column)
+# dates_data_frame$dtn <- gsub("\n", "", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("\r", "", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("  ", "", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("[()]","", dates_data_frame$dtn)
+# for (day in c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")){
+#   dates_data_frame$dtn <- gsub(day, paste("SPLIT", day, "SPLIT"), dates_data_frame$dtn)
+# }
+# 
+# dates_data_frame$dtn <- gsub("p.m.", "p.m.SPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("PM", "PMSPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("P.M.", "P.M.SPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("pm", "pmSPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("a.m.", "a.m.SPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("AM", "AMSPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("A.M.", "A.M.SPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("am", "amSPLIT", dates_data_frame$dtn)
+# 
+# dates_data_frame$dtn <- gsub("Noon", "NoonSPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("CT", "CTSPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("ET", "ETSPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("PT", "PTSPLIT", dates_data_frame$dtn)
+# dates_data_frame$dtn <- gsub("MT", "MTSPLIT", dates_data_frame$dtn)
+# 
+# dates_data_frame$dtn <- strsplit(dates_data_frame$dtn, "SPLIT")
+# 
+# dates_data_frame$Date <- NA
+# dates_data_frame$Day <- NA
+# dates_data_frame$Time <- NA
+# dates_data_frame$Timezone <- NA
+# for (i in 1:nrow(dates_data_frame)) {
+#   dates_data_frame$Date[i] <- dates_data_frame$dtn[[i]][1]
+#   dates_data_frame$Day[i] <- dates_data_frame$dtn[[i]][2]
+#   dates_data_frame$Time[i] <- dates_data_frame$dtn[[i]][3]
+#   dates_data_frame$Timezone[i] <- dates_data_frame$dtn[[i]][4]
+# }
+```
+
+Dates Manipulations Take 2
+```{r}
+dates_data_frame2 <- data.frame(the_date = dates_column2)
+dates_data_frame2$the_date <- gsub("[()]","", dates_data_frame2$the_date)
+for (day in c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")){
+  dates_data_frame2$the_date <- gsub(day, paste("SPLIT", day), dates_data_frame2$the_date)
+}
+dates_data_frame2$the_date <- strsplit(dates_data_frame2$the_date, "SPLIT")
+
+dates_data_frame2$Date <- NA
+dates_data_frame2$Day <- NA
+for (i in 1:nrow(dates_data_frame2)) {
+  dates_data_frame2$Date[i] <- dates_data_frame2$the_date[[i]][1]
+  dates_data_frame2$Day[i] <- dates_data_frame2$the_date[[i]][2]
+}
+```
+
+Times Manipulations Take 2
+```{r}
+times_data_frame <- data.frame(the_time = times_column)
+
+times_data_frame$the_time <- gsub("CT", "SPLITCT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("ET", "SPLITET", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("PT", "SPLITPT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("MT", "SPLITMT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("MST", "SPLITMST", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("[()]", "", times_data_frame$the_time)
+
+
+times_data_frame$the_time <- strsplit(times_data_frame$the_time, "SPLIT")
+
+times_data_frame$Time <- NA
+times_data_frame$Timezone <- NA
+for (i in 1:nrow(times_data_frame)) {
+  times_data_frame$Time[i] <- times_data_frame$the_time[[i]][1]
+  times_data_frame$Timezone[i] <- times_data_frame$the_time[[i]][2]
+}
+```
+
+Results Manipulations
+```{r}
+results_data_frame <- data.frame(Result = results_column) %>% filter(Result != "")
+results_data_frame$Result <- gsub(",", "", results_data_frame$Result)
+results_data_frame$Win_Loss <- NA
+results_data_frame$Score <- NA
+results_data_frame$Team_Score <- NA
+results_data_frame$Opponent_Score <- NA
+results_data_frame$Overtime <- NA
+for (i in 1:nrow(results_data_frame)) {
+  if (results_data_frame$Result[i] == "W") {
+    results_data_frame$Win_Loss[i] <- "W"
+  }
+  else if (results_data_frame$Result[i] == "L") {
+    results_data_frame$Win_Loss[i] <- "L"
+  }
+  else if (results_data_frame$Result[i] == "Canceled" 
+           | results_data_frame$Result[i] == "Postponed"
+           | results_data_frame$Result[i] == "Forfeit") {
+    results_data_frame$Win_Loss[i] <- results_data_frame$Result[i]
+  }
+  else if (grepl("OT", results_data_frame$Result[i], fixed = TRUE)) {
+    results_data_frame$Overtime[i-2] <- results_data_frame$Result[i]
+  }
+  else {
+    #results_data_frame$Score[i-1] <- results_data_frame$Result[i]
+    results_data_frame$Team_Score[i-1] <- str_split(results_data_frame$Result[i], "-")[[1]][1]
+    results_data_frame$Opponent_Score[i-1] <- str_split(results_data_frame$Result[i], "-")[[1]][2]
+  }
+}
+
+results_data_frame <- results_data_frame %>% 
+  filter(!is.na(Team_Score)
+         | Win_Loss == "Postponed"
+         | Win_Loss == "Canceled") %>%
+  select(Win_Loss, Team_Score, Opponent_Score, Overtime)
+
+```
+
+Opponent Manipulations
+```{r}
+opponents_data_frame <- data.frame(Opponent = opponents_column)
+for (token in c("[()]", "1 ", "2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 ", "0 ", "# ",
+                "1", "2", "3", "4","5", "6", "7", "8", "9", "0", "#",
+                "-seed ", "-Seed ", "/", "No. ", "no. ")) {
+  opponents_data_frame$Opponent <- gsub(token, "", opponents_data_frame$Opponent)
+}
+view(opponents_data_frame)
+```
+
+Compilation of Columns
+```{r}
+WBB_Dataframe <- data.frame(Day = dates_data_frame2$Day,
+                            Date = dates_data_frame2$Date,
+                            Time = times_data_frame$Time,
+                            Timezone = times_data_frame$Timezone,
+                            Home_Away = home_away_df$Home_Away,
+                            Opponent = opponents_data_frame$Opponent,
+                            Win_Loss = results_data_frame$Win_Loss,
+                            Team_Score = as.numeric(results_data_frame$Team_Score),
+                            Opponent_Score = as.numeric(results_data_frame$Opponent_Score),
+                            OT = results_data_frame$Overtime,
+                            TV = coverage_data_frame$TV,
+                            Radio = coverage_data_frame$Radio,
+                            Location = location_df$location)
+
+View(WBB_Dataframe)
+```
+
+HTML TO DATAFRAME FUNCTION
+```{r}
+html_to_dataframe <- function(wbb_html) {
+#HTML NODES & HTML TEXT ---------------------------------------
+wbb_html_nodes_opponents <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-name a")
+wbb_html_nodes_results <- wbb_html %>% html_nodes(".text-italic span")
+wbb_html_nodes_dates <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date")
+wbb_html_nodes_dates2 <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date span:nth-child(1)")
+wbb_html_nodes_times <- wbb_html %>% html_nodes(".sidearm-schedule-game-opponent-date span:nth-child(2)")
+wbb_html_nodes_coverage <- wbb_html %>% html_nodes(".sidearm-schedule-game-coverage ")
+wbb_html_nodes_home_away <- wbb_html %>% html_nodes(".sidearm-schedule-game-conference-vs")
+wbb_html_nodes_location <- wbb_html %>% html_nodes(".sidearm-schedule-game-location")
+
+opponents_column <- wbb_html_nodes_opponents %>% html_text()
+results_column <- wbb_html_nodes_results %>% html_text()
+dates_column <- wbb_html_nodes_dates %>% html_text()
+dates_column2 <- wbb_html_nodes_dates2 %>% html_text()
+times_column <- wbb_html_nodes_times %>% html_text()
+coverage_column <- wbb_html_nodes_coverage %>% html_text()
+home_away_column <- wbb_html_nodes_home_away %>% html_text()
+location_column <- wbb_html_nodes_location %>% html_text()
+
+#LOCATION ---------------------------------------
+location_df <- data.frame(location = location_column)
+location_df$location <- gsub("  ", "", location_df$location)
+location_df$location <- gsub("\n", "", location_df$location)
+location_df$location <- gsub("\r", "", location_df$location)
+
+#HOME AWAY ---------------------------------------
+home_away_df <- data.frame(home_away = home_away_column)
+home_away_df$home_away <- gsub(" ", "", home_away_df$home_away)
+home_away_df$home_away <- gsub("\n", "", home_away_df$home_away)
+home_away_df$home_away <- gsub("\r", "", home_away_df$home_away)
+
+home_away_df$Home_Away <- NA
+for (i in 1:nrow(home_away_df)) {
+  if (home_away_df$home_away[i] == "vs") {
+    home_away_df$Home_Away[i] <- "Home"
+  }
+  else if (home_away_df$home_away[i] == "at") {
+    home_away_df$Home_Away[i] <- "Away"
+  }
+  else {
+    home_away_df$Home_Away[i] <- "Neutral"
+  }
+}
+
+#COVERAGE ---------------------------------------
+coverage_data_frame <- data.frame(coverage = coverage_column)
+coverage_data_frame$coverage <- gsub(" ", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- gsub("\r", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- gsub("\n", "", coverage_data_frame$coverage)
+coverage_data_frame$coverage <- str_replace(coverage_data_frame$coverage,"Radio:", "SPLITRadio:")
+coverage_data_frame$coverage <- strsplit(coverage_data_frame$coverage, "SPLIT")
+coverage_data_frame$TV <- NA
+coverage_data_frame$Radio <- NA
+for (i in 1:nrow(coverage_data_frame)) {
+  coverage_data_frame$TV[i] <- coverage_data_frame$coverage[[i]][1]
+  coverage_data_frame$Radio[i] <- coverage_data_frame$coverage[[i]][2]
+}
+coverage_data_frame$TV <- gsub("TV:", "", coverage_data_frame$TV)
+coverage_data_frame$Radio <- gsub("Radio:", "", coverage_data_frame$Radio)
+
+#DATES ---------------------------------------
+dates_data_frame2 <- data.frame(the_date = dates_column2)
+dates_data_frame2$the_date <- gsub("[()]","", dates_data_frame2$the_date)
+for (day in c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")){
+  dates_data_frame2$the_date <- gsub(day, paste("SPLIT", day), dates_data_frame2$the_date)
+}
+dates_data_frame2$the_date <- strsplit(dates_data_frame2$the_date, "SPLIT")
+
+dates_data_frame2$Date <- NA
+dates_data_frame2$Day <- NA
+for (i in 1:nrow(dates_data_frame2)) {
+  dates_data_frame2$Date[i] <- dates_data_frame2$the_date[[i]][1]
+  dates_data_frame2$Day[i] <- dates_data_frame2$the_date[[i]][2]
+}
+
+#TIMES ---------------------------------------
+times_data_frame <- data.frame(the_time = times_column)
+
+times_data_frame$the_time <- gsub("CT", "SPLITCT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("ET", "SPLITET", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("PT", "SPLITPT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("MT", "SPLITMT", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("MST", "SPLITMST", times_data_frame$the_time)
+times_data_frame$the_time <- gsub("[()]", "", times_data_frame$the_time)
+
+times_data_frame$the_time <- strsplit(times_data_frame$the_time, "SPLIT")
+
+times_data_frame$Time <- NA
+times_data_frame$Timezone <- NA
+for (i in 1:nrow(times_data_frame)) {
+  times_data_frame$Time[i] <- times_data_frame$the_time[[i]][1]
+  times_data_frame$Timezone[i] <- times_data_frame$the_time[[i]][2]
+}
+
+#RESULTS ---------------------------------------
+results_data_frame <- data.frame(Result = results_column) %>% filter(Result != "")
+results_data_frame$Result <- gsub(",", "", results_data_frame$Result)
+results_data_frame$Win_Loss <- NA
+results_data_frame$Score <- NA
+results_data_frame$Team_Score <- NA
+results_data_frame$Opponent_Score <- NA
+results_data_frame$Overtime <- NA
+for (i in 1:nrow(results_data_frame)) {
+  if (results_data_frame$Result[i] == "W") {
+    results_data_frame$Win_Loss[i] <- "W"
+  }
+  else if (results_data_frame$Result[i] == "L") {
+    results_data_frame$Win_Loss[i] <- "L"
+  }
+  else if (results_data_frame$Result[i] == "Canceled" 
+           | results_data_frame$Result[i] == "Postponed"
+           | results_data_frame$Result[i] == "Forfeit") {
+    results_data_frame$Win_Loss[i] <- results_data_frame$Result[i]
+  }
+  else if (grepl("OT", results_data_frame$Result[i], fixed = TRUE)) {
+    results_data_frame$Overtime[i-2] <- results_data_frame$Result[i]
+  }
+  else {
+    #results_data_frame$Score[i-1] <- results_data_frame$Result[i]
+    results_data_frame$Team_Score[i-1] <- str_split(results_data_frame$Result[i], "-")[[1]][1]
+    results_data_frame$Opponent_Score[i-1] <- str_split(results_data_frame$Result[i], "-")[[1]][2]
+  }
+}
+
+results_data_frame <- results_data_frame %>% 
+  filter(!is.na(Team_Score)
+         | Win_Loss == "Postponed"
+         | Win_Loss == "Canceled") %>%
+  select(Win_Loss, Team_Score, Opponent_Score, Overtime)
+
+
+#OPPONENTS
+opponents_data_frame <- data.frame(Opponent = opponents_column)
+for (token in c("[()]", "1 ", "2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 ", "0 ", "# ",
+                "1", "2", "3", "4","5", "6", "7", "8", "9", "0", "#",
+                "-seed ", "-Seed ", "/")) {
+  opponents_data_frame$Opponent <- gsub(token, "", opponents_data_frame$Opponent)
+}
+#OPPONENTS ---------------------------------------
+opponents_data_frame <- data.frame(Opponent = opponents_column)
+for (token in c("[()]", "1 ", "2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 ", "0 ", "# ",
+                "1", "2", "3", "4","5", "6", "7", "8", "9", "0", "#",
+                "-seed ", "-Seed ", "/", "No. ", "no. ")) {
+  opponents_data_frame$Opponent <- gsub(token, "", opponents_data_frame$Opponent)
+}
+#COMPILATION ---------------------------------------
+WBB_Dataframe <- data.frame(Day = dates_data_frame2$Day,
+                            Date = dates_data_frame2$Date,
+                            Time = times_data_frame$Time,
+                            Timezone = times_data_frame$Timezone,
+                            Home_Away = home_away_df$Home_Away,
+                            Opponent = opponents_data_frame$Opponent,
+                            Win_Loss = results_data_frame$Win_Loss,
+                            Team_Score = as.numeric(results_data_frame$Team_Score),
+                            Opponent_Score = as.numeric(results_data_frame$Opponent_Score),
+                            OT = results_data_frame$Overtime,
+                            TV = coverage_data_frame$TV,
+                            Radio = coverage_data_frame$Radio,
+                            Location = location_df$location)
+view(WBB_Dataframe)
+}
+```
+
+NOTES
+
+".sidearm-schedule-game-opponent-date span , .sidearm-schedule-game-location span, .sidearm-schedule-game-away, .sidearm-schedule-game-opponent-name a, .sidearm-schedule-game-home, .text-italic span"
+
+html_nodes(".sidearm-schedule-game-opponent-date span , .sidearm-schedule-game-location span, .sidearm-schedule-game-away, .sidearm-schedule-game-opponent-name a, .sidearm-schedule-game-home, .text-italic span")
+
+outcome_function <- function(outcome_string) {
+  if(outcome_string == "Cancelled" OR outcome_string == "Postponed") {
+    return(list(outcome_string, "NA"))
+  }
+  else {
+    return(str_split(outcome_string, ", "))
+  }
+}
+
+
+NEXT STEPS / CHANGE OF PATH
+- I'm still struggling to see how, once I have a data frame for each team from their website, how I'll incorporate the players' statistics for each team
+- How will I store each of these dataframes too, as .csv files? where I create names using the paste0 function
+- I think the best idea I've had is to aim for a HUGE dataframe that contains a row for each game, with the home team, away team, home team score, away team score, etc. etc. etc.
+- Could go more granular and do a row for each team for each game (so games would be duplicated because one would be the home team's row, the other would be the away team's row)
+- An even granular way to look at it would be to have a row for each player of each team for each game -->
+- EG: Saturday, January, 28, 6:00 PM, CT, Northwestern, Ohio State, Home, Veronica Burton, Points, Assists, Rebounds, Steals, Turnovers, Blocks
+- All the data combined together and aggregated in different ways would be able to produce different views, because all the players points for one game will add up to the total points for that team, and all 
+- Northwestern's scores
+- Difficulty: how would I aggregate to get the other team's point totals?
+- Could go more granular and more granular in theory --> could go to the game tracker of points over time. get where people shoot the ball from, etc.
+- Then I could slice the data in different ways to get a table of a teams games, the points they scored, the assists they had, the steals, rebounds, etc. etc etc. --> then I could use those cuts of data and run linear regressions to see how team statistics in different areas predict the outcomes of future games
+Maybe use ESPN's list of games for each day --> figure out the common link pattern for each date 
+-- definitely a way to convert January 12 2022 into '2022-01-12' a date format that can be compared in the computer
+-- ie. could get the data for veronica burton on the road on saturdays against ohio state, etc.
+- ESPN should also have common naming practices across teams throughout their website
+- I don't know if ESPN has multiple years data
+- Will probably be easier to get the home team and away team for 
+
+128 teams x 35 games per season x 12 players
+
+- Data scrape each matchup's link and produce a table with team, player, all of their statistics
+- 
+
+Ultimately this is all data scraping and creating a massive database of datapoints where each datapoint is a single player's performance against a single opponent
+- next steps afterwards are creating an algorithm to predict outcomes
+- and a metric for adjusted efficiency based on the strength of your performances against other teams
+
+ADD the link to the boxscore for each game into the web scraping code --> probably biggest next step
+
+Adjusted efficiency ideas
+- Starting with just big ten games
+- Get each team's points scored per game - offensive efficiency (I know it's simple for now)
+- Get each team's average points against per game - defensive efficiency
+- Get the median defensive efficiency per game
+- Divide each average defensive efficiency by the median to get a number that is close to 1
+- Now for each matchup, to get the adjusted defensive points for that game, divide the team's points against by the opponent's offensive efficiency ratio within the conference
+
+Ideas for comparing conferences
+- First have efficiency ratings for each team within each conference (See above) - number above/below 1
+- Then for each combination of conferences get the average points against for both conferences in all the matchups between teams from those conferences
+- Get a comparative efficiency ratio of one conference vs the other for both offensive and defensive
+- EG: B1G VS ACC Defensive Ratio --> 1.15 (B1G has worse defense, they give up more points per game than ACC)
+- OSU gives up 88 PPG and has B1G defensive efficiency ratio of 1.00 (they're also the median team) 
+- Duke gives up 70 PPG and has ACC defensive efficiency ratio of 1.00 (they're the median team)
+- Duke beats OSU 76-74 --> (Duke gave up 74, OSU gave up 76)
+- The adjusted score is, based on of the number of points Duke scored against OSU, how many points they would score against the median team in the ACC
+- AKA, only giving up 74 against duke translates to only giving up 70 (?) against the generic college basketball team (because the ratios between conferences will include their conferences' performances against other conferences)
+- The points scored by a team will take into account defensive ratios
+- The points against will take into account offensive ratios of one conference vs another (because it's impressive that you give up few points against a team from a conference that has really good offense)
+- Once I have ratios between the conferences --> for each conference, multiply all the ratios by each other to get a general number that compares a conferences offense to the generic offense
+- So, can get the adjusted points against by dividing points against by in conference offensive efficiency ratio, and then that conferences overall offensive ratio
+- From there I can rank conferences offenses, and individual teams offenses --> Then I'll have both ratios and 
+
+
+
+USE ESPN WEBSITE: WHY?
+- Only have to deal with one webpage template, the source code will be the same for every matchup and team and I likely won't have to deal with going through individual teams... I'll
+- That will help with all columns hopefully being the same when I do the web scraping
+- Names of teams will all be consistent in terms of abbreviations and state, etc.
+- The home and away teams will be clear
+
+ISSUES?
+- Multiple seasons worth of data?
+
+Explore further
+- Include points per minute or half or 60 mins etc to incorporate overtime, etc.
+- Exclude garbage time parts of the game where it's likely that scrubs would be in the game (eg. last 10 mins when team down by more than 20) or last 1:30 when team down by more than 12
+
+Other cool analysis ideas:
+- A cool analysis could be an exploration of when different coaches put in their scrubs and rest their best players
+
+
+
+
+
+
+
+
+
+
